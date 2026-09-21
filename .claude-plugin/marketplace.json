@@ -1,0 +1,14 @@
+{
+  "name": "xiy-slider",
+  "owner": {
+    "name": "Xiy",
+    "email": "contact@xiy.ai"
+  },
+  "plugins": [
+    {
+      "name": "slider-for-claude",
+      "source": "./",
+      "description": "Build, inspect, and test Windows apps in Slider on your Apple silicon Mac."
+    }
+  ]
+}
