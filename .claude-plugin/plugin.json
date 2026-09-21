@@ -1,0 +1,17 @@
+{
+  "name": "slider-for-claude",
+  "version": "0.3.6",
+  "description": "Build, inspect, and test Windows apps in Slider on your Apple silicon Mac.",
+  "author": {
+    "name": "Xiy",
+    "email": "contact@xiy.ai"
+  },
+  "homepage": "https://slider.xiy.ai",
+  "keywords": [
+    "windows",
+    "arm64",
+    "development",
+    "slider",
+    "mcp"
+  ]
+}
