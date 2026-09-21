@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+# GUI apps may not inherit the user's interactive shell PATH.
+if command -v node >/dev/null 2>&1; then
+    runtime=$(command -v node)
+elif [ -x /opt/homebrew/bin/node ]; then
+    runtime=/opt/homebrew/bin/node
+elif [ -x "$HOME/.local/bin/node" ]; then
+    runtime="$HOME/.local/bin/node"
+elif [ -x /usr/local/bin/node ]; then
+    runtime=/usr/local/bin/node
+else
+    echo "Slider requires Node.js 20 or newer. Install Node, then restart Claude." >&2
+    exit 127
+fi
+script_dir=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)
+exec "$runtime" "$script_dir/slider-mcp.mjs"
