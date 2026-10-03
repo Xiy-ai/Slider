@@ -1,6 +1,6 @@
 {
   "name": "slider-for-claude",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Build, inspect, and test Windows apps in Slider on your Apple silicon Mac.",
   "author": {
     "name": "Xiy",
@@ -15,7 +15,7 @@
     "mcp"
   ],
   "displayName": "Slider",
-  "icon": "./assets/slider-icon.png",
+  "icon": "./assets/slider-icon-white.png",
   "repository": "https://github.com/Xiy-ai/Slider",
   "license": "Apache-2.0",
   "documentationUrl": "https://github.com/Xiy-ai/Slider#readme",

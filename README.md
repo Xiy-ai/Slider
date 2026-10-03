@@ -50,6 +50,10 @@ Contact contact@xiy.ai. Product: https://slider.xiy.ai
 
 Licensed under Apache-2.0; see LICENSE.
 
+## Version 0.3.10
+
+Directory artwork update: uses the original white Slider logo with reduced padding for better visibility. Tool behavior is unchanged from 0.3.9.
+
 ## Version 0.3.9
 
 Includes export-resume integrity checks introduced in 0.3.7 and compatibility with guest helper 0.6.9. Update Slider and the plugin together. After updating, start a fresh local Claude Code session and check `windows_status` and `windows_readiness`.

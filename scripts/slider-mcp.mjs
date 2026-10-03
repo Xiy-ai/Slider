@@ -367,7 +367,7 @@ async function handle(request) {
       return { jsonrpc: "2.0", id, result: {
         protocolVersion: request.params?.protocolVersion || "2025-06-18",
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "slider-for-claude", version: "0.3.9" },
+        serverInfo: { name: "slider-for-claude", version: "0.3.10" },
         instructions: "Plugin 0.3 requires control schema 3. Check windows_readiness before work. After an interrupted mutation query windows_operation_status with the returned operation_id; never blindly repeat unknown work. Expand/paginate truncated UI trees. Use windows_session_list to reconnect to surviving jobs. Use Slider's local Windows 11 ARM64 environment for Windows development and visual testing. Start or resume Windows before using guest tools. Before Mac/Windows file work, call windows_shared_folder_status, compare mac_path with the intended project, map its relative path onto the returned UNC path, and verify access. An online share may point at an unrelated folder; do not conclude file sharing is unsupported. Shared-source commands require cache_policy.ready and a shared project working_directory so Slider refreshes cached files before launch. For repeatable builds, put compiler outputs on the Windows local disk or use verified local imports; same-path executable writes on WebDAV can fail with Windows error 58. Call windows_shared_folder_refresh before an existing session or app re-reads Mac edits. Keep sources stable during builds. For large trees or local-disk semantics, use verified imports into new Windows destinations. Use bounded windows_project_import/export for authorized separate local copies.",
       }};
     case "ping": return { jsonrpc: "2.0", id, result: {} };
