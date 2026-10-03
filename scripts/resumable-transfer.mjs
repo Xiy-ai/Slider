@@ -8,6 +8,12 @@ const chunkSize=1024*1024;
 const active=new Map();
 const directory=()=>process.env.SLIDER_TRANSFER_STATE_DIR??path.join(homedir(),'Library','Application Support','Slider','Transfers');
 const digest=async file=>{const h=createHash('sha256');for await(const part of createReadStream(file))h.update(part);return h.digest('hex');};
+async function committedPrefix(handle,length,expected){
+ const hash=createHash('sha256'),buffer=Buffer.alloc(chunkSize);let offset=0;
+ while(offset<length){const amount=Math.min(buffer.length,length-offset);const {bytesRead}=await handle.read(buffer,0,amount,offset);if(!bytesRead)throw Error('Partial destination shorter than committed progress');hash.update(buffer.subarray(0,bytesRead));offset+=bytesRead;}
+ if(expected&&hash.copy().digest('hex')!==expected)throw Error('Partial destination conflict: committed bytes changed');
+ return hash;
+}
 function checkName(name){if(!name||/[<>:"/\\|?*\x00-\x1f]/.test(name)||/[. ]$/.test(name)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(name)||name==='.'||name==='..')throw Error('Unsupported transfer name');}
 async function noLinks(file){for(let p=file;;p=path.dirname(p)){if((await fs.lstat(p)).isSymbolicLink())throw Error('Transfer paths cannot contain symbolic links');if(path.dirname(p)===p)break;}}
 function idPath(id){if(!/^[0-9a-f-]{36}$/.test(id))throw Error('Invalid transfer ID');return path.join(directory(),id+'.json');}
@@ -58,18 +64,22 @@ async function run(s,call,control){
     const remoteHash=await call('windows_file_hash',{path:remote});if(remoteHash.sha256!==e.sha256||remoteHash.length!==e.size)throw Error('Destination checksum mismatch');
    }else{
     await noLinks(path.dirname(local));let h;try{h=await fs.open(local,'wx+');}catch(e){if(e.code!=='EEXIST')throw e;await noLinks(local);h=await fs.open(local,'r+');}
-    try{do{
+    try{
+     const existing=await h.stat();if(existing.size<s.offset)throw Error('Partial destination shorter than committed progress');
+     const prefixHash=await committedPrefix(h,s.offset,s.prefix_sha256);
+     do{
      if(control.cancelled || await fs.stat(idPath(s.transfer_id)+'.cancel').then(()=>true,()=>false)){s.state='cancelled';await save(s);return;}
      const part=await call('windows_file_chunk_read',{path:remote,offset:s.offset,chunk_length:chunkSize});if(part.length!==e.size)throw Error('Source size changed');const buffer=Buffer.from(part.contentBase64,'base64');if(!buffer.length&&s.offset<e.size)throw Error('Unexpected empty chunk');
      const st=await h.stat();if(st.size<s.offset)throw Error('Partial destination shorter than committed progress');
      const overlap=Math.min(buffer.length,st.size-s.offset),old=Buffer.alloc(overlap);let got=0;while(got<overlap){const r=await h.read(old,got,overlap-got,s.offset+got);if(!r.bytesRead)throw Error('Short read');got+=r.bytesRead;}if(!old.equals(buffer.subarray(0,overlap)))throw Error('Partial destination conflict');
      let n=overlap;while(n<buffer.length){const w=await h.write(buffer,n,buffer.length-n,s.offset+n);if(!w.bytesWritten)throw Error('Short write');n+=w.bytesWritten;}await h.sync();
-     s.offset+=buffer.length;s.bytes_completed+=buffer.length;await save(s);
-    }while(s.offset<e.size);}finally{await h.close();}
+     prefixHash.update(buffer);s.offset+=buffer.length;s.bytes_completed+=buffer.length;s.prefix_sha256=prefixHash.copy().digest('hex');await save(s);
+     }while(s.offset<e.size);
+    }finally{await h.close();}
     if(await digest(local)!==e.sha256||(await fs.stat(local)).size!==e.size)throw Error('Export checksum mismatch');
    }
    // Persist next-file position before proceeding; repeated verification is safe.
-   s.index++;s.offset=0;await save(s);s.index--;
+   s.index++;s.offset=0;delete s.prefix_sha256;await save(s);s.index--;
   }
   if(s.direction==='import'){
    // Reconcile a lost final rename reply by verifying the destination manifest.

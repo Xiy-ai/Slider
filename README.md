@@ -1,5 +1,7 @@
 # Slider for Claude Code
 
+![Slider icon](assets/slider-icon.png)
+
 Use Claude Code desktop to build, run, inspect and test Windows applications in a local Slider VM on your Mac.
 
 This repository contains only the Claude plugin. It does not contain the Slider app, Windows, VM disks or user data.
@@ -8,10 +10,10 @@ This repository contains only the Claude plugin. It does not contain the Slider 
 
 - Apple silicon Mac running macOS 26 or newer.
 - A compatible Slider app with private developer control enabled, running Windows 11 ARM64.
-- Guest helper 0.6.6 and control schema 3 (updated by compatible Slider builds).
+- Guest helper 0.6.9 and control schema 3 (updated by compatible Slider builds).
 - Node.js 20 or newer, and a local Claude Code session on the same Mac.
 
-Version 0.3.6 was verified with the Slider Debug build on 21 September 2026. Public app availability is separate; check your installed app's readiness before use. Cloud sessions cannot reach this local VM. Keep Slider visible: minimizing may pause Windows.
+Version 0.3.9 matches the current Codex plugin release. On 3 October 2026, isolated package checks passed initialization and exact parity for all 50 tool schemas and capabilities. This does not establish a fresh Claude Desktop end-to-end test. Public app availability is separate; check your installed app's readiness before use. Cloud sessions cannot reach this local VM. Keep Slider visible: minimizing may pause Windows.
 
 ## Install
 
@@ -47,3 +49,7 @@ The plugin runs a local MCP process and communicates with Slider's private local
 Contact contact@xiy.ai. Product: https://slider.xiy.ai
 
 Licensed under Apache-2.0; see LICENSE.
+
+## Version 0.3.9
+
+Includes export-resume integrity checks introduced in 0.3.7 and compatibility with guest helper 0.6.9. Update Slider and the plugin together. After updating, start a fresh local Claude Code session and check `windows_status` and `windows_readiness`.

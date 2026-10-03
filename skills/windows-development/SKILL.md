@@ -15,7 +15,7 @@ discovery is unavailable. Do not print or copy its authentication token into cha
 or logs. An older installed app may need updating alongside the plugin; do not
 request broad disk access or change app-group permissions to bypass discovery.
 
-1. Call `windows_status` before any Windows operation, then `windows_readiness` before development. Plugin 0.3 requires control schema 3 and guest agent 0.6.6. An old schema or disconnected agent is not a ready desktop. Do not bypass a protected prompt.
+1. Call `windows_status` before any Windows operation, then `windows_readiness` before development. Plugin 0.3 requires control schema 3 and guest agent 0.6.9. An old schema or disconnected agent is not a ready desktop. Do not bypass a protected prompt.
 2. If Windows is stopped or paused, call `windows_start` and wait until `windows_status` reports `running`.
 3. Discover the required tool before building. Use `windows_exec` with an absolute executable path. Common shells are:
    - `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
@@ -110,7 +110,7 @@ directory. Individual reads and writes remain limited to 8 MiB.
 
 ## Shared project folder and build consistency
 
-### Cache refresh before builds (plugin 0.3.6 / guest 0.6.6)
+### Cache refresh before builds (plugin 0.3.9 / guest 0.6.9)
 
 Check `cache_policy.ready` in shared status. An integration upgrade configures the
 Windows WebDAV metadata cache and may report `restart_required: true`. Save work
@@ -130,6 +130,14 @@ its file handles first. A successful refresh is a boundary for closed files;
 `immediate_cache_coherence` remains false. Already-loaded editor buffers, open
 file handles, file watchers and concurrent Mac edits are not synchronized.
 Finish edits before refreshing and keep sources stable during a build.
+
+The share is a WebDAV source bridge, not a guaranteed local build disk.
+Repeated compiler writes to the same executable on the UNC share have
+occasionally failed with Windows error 58 after a successful source refresh.
+For repeatable builds, import the revision into a new local Windows workspace
+or direct compiler output and intermediate files to a local Windows directory.
+Use verified export to return artifacts to the Mac. Never rerun an arbitrary
+failed build blindly; inspect its output and any partial artifact first.
 
 The barrier rejects open/busy files, changed source inventories, links, unsupported
 names and case collisions. It is bounded to 4096 paths (including composed/decomposed Unicode variants) and 1 MiB of path text;
@@ -231,6 +239,10 @@ Use `windows_exec` and session tools for builds and captured output.
 focused `window_id` when available. Use `windows_key` for Enter, Tab and shortcuts.
 A focus change or held modifier stops typing: inspect before retrying to avoid
 duplicate text. It reports queued input, not proof the application accepted it.
+The same applies to UI Automation `fill`: a dialog can expose the requested
+`value` without committing it to the application's save operation. For Save As
+and similar dialogs, verify the actual destination with `windows_file_stat` or
+`windows_file_read` after saving; a displayed filename alone is not proof.
 
 Every coordinate action (`windows_hover`, `windows_click`, `windows_drag`,
 `windows_scroll`) requires `frame_id` from `windows_screenshot`. Capture again on
@@ -363,7 +375,7 @@ no attached external writable disks. QCOW backing chains are rejected.
   checkpoint list and disk state; do not blindly replay an unknown restore.
 
 
-## Desktop release 0.3.6 completion and failure rules
+## Desktop release 0.3.7 completion and failure rules
 
 Use these same tools in the Claude Code desktop app; a terminal interface is not required.
 Use Slider with its developer integration enabled and keep the VM visible while

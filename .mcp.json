@@ -1,8 +1,7 @@
 {
   "mcpServers": {
     "slider-windows": {
-      "command": "/bin/sh",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/slider-mcp"]
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/slider-mcp"
     }
   }
 }
