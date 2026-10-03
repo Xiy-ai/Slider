@@ -18,5 +18,8 @@
   "icon": "./assets/slider-icon.png",
   "repository": "https://github.com/Xiy-ai/Slider",
   "license": "Apache-2.0",
-  "documentationUrl": "https://github.com/Xiy-ai/Slider#readme"
+  "documentationUrl": "https://github.com/Xiy-ai/Slider#readme",
+  "supportUrl": "https://slider.xiy.ai/support",
+  "privacyPolicyUrl": "https://slider.xiy.ai/privacy",
+  "termsOfServiceUrl": "https://slider.xiy.ai/terms"
 }
