@@ -1,6 +1,10 @@
 # Slider for Claude Code
 
-![Slider icon](assets/slider-icon.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/slider-icon-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/slider-icon.png">
+  <img src="assets/slider-icon.png" alt="Slider" width="192" height="192">
+</picture>
 
 Use Claude Code desktop to build, run, inspect and test Windows applications in a local Slider VM on your Mac.
 
