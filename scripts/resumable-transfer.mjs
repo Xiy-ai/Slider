@@ -6,6 +6,9 @@ import {randomUUID,createHash} from 'node:crypto';
 const defaults=['.git','node_modules','.venv','venv','bin','obj','.DS_Store'];
 const chunkSize=1024*1024;
 const active=new Map();
+const journalProgress=new WeakMap();
+const manifestSaved=new WeakSet();
+const position=s=>({index:s.index,offset:s.offset,bytes_completed:s.bytes_completed,prefix_sha256:s.prefix_sha256});
 const directory=()=>process.env.SLIDER_TRANSFER_STATE_DIR??path.join(homedir(),'Library','Application Support','Slider','Transfers');
 const digest=async file=>{const h=createHash('sha256');for await(const part of createReadStream(file))h.update(part);return h.digest('hex');};
 async function committedPrefix(handle,length,expected){
@@ -17,8 +20,21 @@ async function committedPrefix(handle,length,expected){
 function checkName(name){if(!name||/[<>:"/\\|?*\x00-\x1f]/.test(name)||/[. ]$/.test(name)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(name)||name==='.'||name==='..')throw Error('Unsupported transfer name');}
 async function noLinks(file){for(let p=file;;p=path.dirname(p)){if((await fs.lstat(p)).isSymbolicLink())throw Error('Transfer paths cannot contain symbolic links');if(path.dirname(p)===p)break;}}
 function idPath(id){if(!/^[0-9a-f-]{36}$/.test(id))throw Error('Invalid transfer ID');return path.join(directory(),id+'.json');}
-async function save(s){await fs.mkdir(directory(),{recursive:true,mode:0o700});await noLinks(directory());const file=idPath(s.transfer_id),tmp=file+'.'+randomUUID();await fs.writeFile(tmp,JSON.stringify(s),{mode:0o600,flag:'wx'});await fs.rename(tmp,file);}
-async function load(id){await noLinks(idPath(id));const s=JSON.parse(await fs.readFile(idPath(id),'utf8'));if(s.transfer_id!==id||!['import','export'].includes(s.direction)||!path.isAbsolute(s.local)||!/^C:\\SliderWorkspaces\\/i.test(s.guest)||s.entries.length>100000)throw Error('Invalid transfer journal');s.guest.slice(20).split('\\').forEach(checkName);for(const e of s.entries){e.relative.split('\\').forEach(checkName);if(!Number.isSafeInteger(e.size)||e.size<0)throw Error('Invalid journal size');}if(s.stage!==(s.direction==='import'?'C:\\SliderWorkspaces\\.slider-transfer-'+id:s.local))throw Error('Invalid staging path');return s;}
+async function save(s){
+ await fs.mkdir(directory(),{recursive:true,mode:0o700});await noLinks(directory());const file=idPath(s.transfer_id);
+ if(!manifestSaved.has(s)){
+  const manifest=file+'.manifest';
+  try{await fs.writeFile(manifest,JSON.stringify(s.entries),{mode:0o600,flag:'wx'});}
+  catch(error){if(error.code!=='EEXIST')throw error;await noLinks(manifest);const previous=JSON.parse(await fs.readFile(manifest,'utf8'));if(JSON.stringify(previous)!==JSON.stringify(s.entries))throw Error('Transfer manifest conflict');}
+  manifestSaved.add(s);
+ }
+ const {entries,...progress}=s,tmp=file+'.'+randomUUID();
+ try{await fs.writeFile(tmp,JSON.stringify({...progress,journal_version:2}),{mode:0o600,flag:'wx'});await fs.rename(tmp,file);}
+ finally{await fs.unlink(tmp).catch(error=>{if(error.code!=='ENOENT')throw error;});}
+ journalProgress.set(s,{time:Date.now(),bytes:s.bytes_completed});
+}
+async function saveProgress(s,sync){const previous=journalProgress.get(s);if(previous&&Date.now()-previous.time<1000&&s.bytes_completed-previous.bytes<8*1024*1024)return;if(sync)await sync();await save(s);}
+async function load(id){await noLinks(idPath(id));const s=JSON.parse(await fs.readFile(idPath(id),'utf8'));if(s.journal_version===2){await noLinks(idPath(id)+'.manifest');s.entries=JSON.parse(await fs.readFile(idPath(id)+'.manifest','utf8'));manifestSaved.add(s);}if(!Array.isArray(s.entries)||s.transfer_id!==id||!['import','export'].includes(s.direction)||!path.isAbsolute(s.local)||!/^C:\\SliderWorkspaces\\/i.test(s.guest)||s.entries.length>100000)throw Error('Invalid transfer journal');s.guest.slice(20).split('\\').forEach(checkName);for(const e of s.entries){e.relative.split('\\').forEach(checkName);if(!Number.isSafeInteger(e.size)||e.size<0)throw Error('Invalid journal size');}if(s.stage!==(s.direction==='import'?'C:\\SliderWorkspaces\\.slider-transfer-'+id:s.local))throw Error('Invalid staging path');return s;}
 async function otherActive(id){try{const pid=Number(await fs.readFile(idPath(id)+'.lock','utf8'));if(!Number.isInteger(pid)||pid<1)return false;process.kill(pid,0);return true;}catch(e){return e.code==='EPERM';}}
 function report(s,other=false){return {transfer_id:s.transfer_id,state:s.state==='completed'?'completed':(active.has(s.transfer_id)||other)?'running':s.state==='running'?'interrupted':s.state,bytes_completed:s.bytes_completed,total_bytes:s.total_bytes,entries_completed:s.index,entries:s.entries.length,source:s.direction==='import'?s.local:s.guest,destination:s.direction==='import'?s.guest:s.local,direction:s.direction,excluded:s.exclude,error:s.error??null,verified:s.state==='completed',partial_path:s.stage};}
 async function plan(args,call){
@@ -45,7 +61,7 @@ async function acquire(id){
  try{const h=await fs.open(file,'wx',0o600);await h.writeFile(String(process.pid));await h.close();return file;}
  catch(e){if(e.code!=='EEXIST')throw e;const pid=Number(await fs.readFile(file,'utf8'));if(!Number.isInteger(pid)||pid<1)throw Error('Invalid transfer lock; inspect before recovery');try{process.kill(pid,0);}catch(e){if(e.code==='ESRCH'){await fs.unlink(file);return acquire(id);}throw e;}throw Error('Transfer is active in another plugin process');}
 }
-async function begin(s,call){const lock=await acquire(s.transfer_id),control={};active.set(s.transfer_id,control);run(s,call,control).catch(e=>{console.error('Transfer journal error: '+e.message);}).finally(async()=>{await fs.unlink(lock).catch(()=>{});active.delete(s.transfer_id);});}
+async function begin(s,call){if(active.has(s.transfer_id))throw Error('This transfer is already active.');if(active.size>=4)throw Error('Four transfers are already active. Wait for one to finish.');const control={};active.set(s.transfer_id,control);let lock;try{lock=await acquire(s.transfer_id);}catch(error){active.delete(s.transfer_id);throw error;}run(s,call,control).catch(e=>{console.error('Transfer journal error: '+e.message);}).finally(async()=>{await fs.unlink(lock).catch(()=>{});active.delete(s.transfer_id);});}
 async function run(s,call,control){
  s.state='running';delete s.error;await save(s);
  try{
@@ -53,33 +69,35 @@ async function run(s,call,control){
   for(;s.index<s.entries.length;s.index++,s.offset=0){
    if(control.cancelled || await fs.stat(idPath(s.transfer_id)+'.cancel').then(()=>true,()=>false)){s.state='cancelled';await save(s);return;}
    const e=s.entries[s.index],local=path.join(s.local,...e.relative.split('\\')),remote=(s.direction==='import'?s.stage:s.guest)+'\\'+e.relative;
-   if(e.directory){if(s.direction==='import')await call('windows_file_mkdir',{path:remote});else {await fs.mkdir(local,{recursive:true});await noLinks(local);}await save(s);continue;}
+   if(e.directory){if(s.direction==='import')await call('windows_file_mkdir',{path:remote});else {await fs.mkdir(local,{recursive:true});await noLinks(local);}await saveProgress(s);continue;}
    if(s.direction==='import'){
     await noLinks(local);if(await digest(local)!==e.sha256)throw Error('Source changed; start a new transfer after reviewing changes');
     const h=await fs.open(local,'r');try{do{
      if(control.cancelled || await fs.stat(idPath(s.transfer_id)+'.cancel').then(()=>true,()=>false)){s.state='cancelled';await save(s);return;}
      const buffer=Buffer.alloc(Math.min(chunkSize,e.size-s.offset));let got=0;while(got<buffer.length){const r=await h.read(buffer,got,buffer.length-got,s.offset+got);if(!r.bytesRead)throw Error('Source shortened');got+=r.bytesRead;}
-     await call('windows_file_chunk_write',{path:remote,offset:s.offset,contentBase64:buffer.toString('base64')});s.offset+=buffer.length;s.bytes_completed+=buffer.length;await save(s);
+     await call('windows_file_chunk_write',{path:remote,offset:s.offset,contentBase64:buffer.toString('base64')});s.offset+=buffer.length;s.bytes_completed+=buffer.length;await saveProgress(s);
     }while(s.offset<e.size);}finally{await h.close();}
     const remoteHash=await call('windows_file_hash',{path:remote});if(remoteHash.sha256!==e.sha256||remoteHash.length!==e.size)throw Error('Destination checksum mismatch');
    }else{
     await noLinks(path.dirname(local));let h;try{h=await fs.open(local,'wx+');}catch(e){if(e.code!=='EEXIST')throw e;await noLinks(local);h=await fs.open(local,'r+');}
+    let durable=position(s);
+    const sync=async()=>{try{await h.sync();durable=position(s);}catch(error){Object.assign(s,durable);if(durable.prefix_sha256===undefined)delete s.prefix_sha256;throw error;}};
     try{
      const existing=await h.stat();if(existing.size<s.offset)throw Error('Partial destination shorter than committed progress');
      const prefixHash=await committedPrefix(h,s.offset,s.prefix_sha256);
      do{
-     if(control.cancelled || await fs.stat(idPath(s.transfer_id)+'.cancel').then(()=>true,()=>false)){s.state='cancelled';await save(s);return;}
+     if(control.cancelled || await fs.stat(idPath(s.transfer_id)+'.cancel').then(()=>true,()=>false)){await sync();s.state='cancelled';await save(s);return;}
      const part=await call('windows_file_chunk_read',{path:remote,offset:s.offset,chunk_length:chunkSize});if(part.length!==e.size)throw Error('Source size changed');const buffer=Buffer.from(part.contentBase64,'base64');if(!buffer.length&&s.offset<e.size)throw Error('Unexpected empty chunk');
      const st=await h.stat();if(st.size<s.offset)throw Error('Partial destination shorter than committed progress');
      const overlap=Math.min(buffer.length,st.size-s.offset),old=Buffer.alloc(overlap);let got=0;while(got<overlap){const r=await h.read(old,got,overlap-got,s.offset+got);if(!r.bytesRead)throw Error('Short read');got+=r.bytesRead;}if(!old.equals(buffer.subarray(0,overlap)))throw Error('Partial destination conflict');
-     let n=overlap;while(n<buffer.length){const w=await h.write(buffer,n,buffer.length-n,s.offset+n);if(!w.bytesWritten)throw Error('Short write');n+=w.bytesWritten;}await h.sync();
-     prefixHash.update(buffer);s.offset+=buffer.length;s.bytes_completed+=buffer.length;s.prefix_sha256=prefixHash.copy().digest('hex');await save(s);
+     let n=overlap;while(n<buffer.length){const w=await h.write(buffer,n,buffer.length-n,s.offset+n);if(!w.bytesWritten)throw Error('Short write');n+=w.bytesWritten;}
+     prefixHash.update(buffer);s.offset+=buffer.length;s.bytes_completed+=buffer.length;s.prefix_sha256=prefixHash.copy().digest('hex');await saveProgress(s,sync);
      }while(s.offset<e.size);
-    }finally{await h.close();}
+    }finally{try{await sync();}finally{await h.close();}}
     if(await digest(local)!==e.sha256||(await fs.stat(local)).size!==e.size)throw Error('Export checksum mismatch');
    }
    // Persist next-file position before proceeding; repeated verification is safe.
-   s.index++;s.offset=0;delete s.prefix_sha256;await save(s);s.index--;
+   s.index++;s.offset=0;delete s.prefix_sha256;await saveProgress(s);s.index--;
   }
   if(s.direction==='import'){
    // Reconcile a lost final rename reply by verifying the destination manifest.
@@ -118,5 +136,9 @@ export async function transferTool(name,args,call){
   if(active.has(s.transfer_id)||await otherActive(s.transfer_id)||s.state==='completed')return report(s,await otherActive(s.transfer_id));await fs.unlink(idPath(s.transfer_id)+'.cancel').catch(()=>{});
   await begin(s,call);return report(s);
  }
- return report(s,await otherActive(s.transfer_id));
+ const other=await otherActive(s.transfer_id);
+ // Completion publishes its journal before releasing the worker lock. A status
+ // read that raced that publication must reread rather than invent interruption.
+ if(s.state==='running'&&!active.has(s.transfer_id)&&!other)return report(await load(s.transfer_id));
+ return report(s,other);
 }

@@ -1,12 +1,18 @@
 {
   "name": "slider-for-claude",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "Build, inspect, and test Windows apps in Slider on your Apple silicon Mac.",
   "author": {
     "name": "Xiy",
     "email": "contact@xiy.ai"
   },
   "homepage": "https://slider.xiy.ai",
+  "documentationUrl": "https://github.com/Xiy-ai/Slider#readme",
+  "supportUrl": "https://slider.xiy.ai/support",
+  "privacyPolicyUrl": "https://slider.xiy.ai/privacy",
+  "termsOfServiceUrl": "https://slider.xiy.ai/terms",
+  "displayName": "Slider",
+  "icon": "./assets/slider-icon-white.png",
   "keywords": [
     "windows",
     "arm64",
@@ -14,12 +20,6 @@
     "slider",
     "mcp"
   ],
-  "displayName": "Slider",
-  "icon": "./assets/slider-icon-white.png",
   "repository": "https://github.com/Xiy-ai/Slider",
-  "license": "Apache-2.0",
-  "documentationUrl": "https://github.com/Xiy-ai/Slider#readme",
-  "supportUrl": "https://slider.xiy.ai/support",
-  "privacyPolicyUrl": "https://slider.xiy.ai/privacy",
-  "termsOfServiceUrl": "https://slider.xiy.ai/terms"
+  "license": "Apache-2.0"
 }

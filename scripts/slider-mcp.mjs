@@ -7,7 +7,7 @@ import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { createInterface } from "node:readline";
+import { BoundedFrames } from "./bounded-frames.mjs";
 import { pathToFileURL } from "node:url";
 
 const SUFFIX = "slide.xiy.ai.runtime.sessions";
@@ -228,7 +228,15 @@ async function launchSlider() {
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+let cachedEndpoint;
+let discoveryTask;
 async function discoverEndpoint() {
+  if(cachedEndpoint)return cachedEndpoint;
+  if(discoveryTask)return discoveryTask;
+  discoveryTask=discoverEndpointUncached();
+  try{cachedEndpoint=await discoveryTask;return cachedEndpoint;}finally{discoveryTask=null;}
+}
+async function discoverEndpointUncached() {
   const probe = async () => {
     for (const endpoint of readEndpoints()) {
       try { await send(endpoint, "windows_status", {}, 1500); return endpoint; } catch {}
@@ -255,7 +263,8 @@ async function discoverEndpoint() {
 function send(endpoint, operation, args, timeoutMS) {
   return new Promise((resolve, reject) => {
     const socket = createConnection({ host: endpoint.host, port: endpoint.port });
-    let response = Buffer.alloc(0);
+    const reader = new BoundedFrames(MAX_RESPONSE);
+    let received = false;
     let dispatched = false;
     const timeoutSeconds = operation === "windows_exec" ? Number(args.timeout_seconds ?? 600) + 150
       : operation === "windows_shared_folder_refresh" ? 180 : 60;
@@ -265,13 +274,13 @@ function send(endpoint, operation, args, timeoutMS) {
       socket.write(`${JSON.stringify({ token: endpoint.token, operation, arguments: args })}\n`);
     });
     socket.on("data", (chunk) => {
-      response = Buffer.concat([response, chunk]);
-      if (response.length > MAX_RESPONSE) socket.destroy(new Error("Slider developer response is too large."));
-      const newline = response.indexOf(0x0a);
-      if (newline !== -1) {
+      let frames;
+      try{frames=reader.push(chunk);}catch(error){socket.destroy(error);return;}
+      if (!received && frames.length) {
+        received = true;
         socket.end();
         try {
-          const object = JSON.parse(response.subarray(0, newline).toString("utf8"));
+          const object = JSON.parse(frames[0].toString("utf8"));
           if (object.ok) resolve(object.result ?? {});
           else {
             const error = new Error(object.error || "Slider rejected the developer request.");
@@ -286,7 +295,7 @@ function send(endpoint, operation, args, timeoutMS) {
     });
     socket.on("error", (error) => { error.dispatched = dispatched; reject(error); });
     socket.on("end", () => {
-      if (!response.includes(0x0a)) {
+      if (!received) {
         const error = new Error("Slider closed the developer connection without a response.");
         error.dispatched = dispatched;
         reject(error);
@@ -298,7 +307,11 @@ function send(endpoint, operation, args, timeoutMS) {
 async function rawCall(operation,args) {
   const endpoint=await discoverEndpoint();
   try{return await send(endpoint,operation,args);}
-  catch(error){if(error.dispatched||error.code!=="ECONNREFUSED")throw error;return await send(await discoverEndpoint(),operation,args);}
+  catch(error){
+    if(["ECONNREFUSED","ECONNRESET","EPIPE"].includes(error.code))cachedEndpoint=null;
+    if(error.dispatched||error.code!=="ECONNREFUSED")throw error;
+    return await send(await discoverEndpoint(),operation,args);
+  }
 }
 
 // Separate dependency injection makes reconnect/retry behavior testable without a VM.
@@ -319,9 +332,11 @@ async function recordedCall(operation,args,transport=rawCall,sleep=delay) {
     const sharedLaunch = ["windows_exec", "windows_session_start", "windows_launch"].includes(operation)
       && /^\\\\localhost@9843\\DavWWWRoot(?:\\|$)/i.test(args.working_directory ?? "");
     const deadline=Date.now()+(Number(args.timeout_seconds??600)+(sharedLaunch?180:60))*1000;
+    let pollDelay=250;
     while(receipt.state==="accepted"||receipt.state==="running") {
       if(Date.now()>deadline)throw new Error("Operation is still pending; query its receipt instead of starting another action.");
-      await sleep(250);
+      await sleep(pollDelay);
+      pollDelay=Math.min(1000,pollDelay*2);
       try{receipt=await transport("windows_operation_status",{operation_id:id});}
       catch(error){if(!error.dispatched&&error.code!=="ECONNREFUSED")throw error;await sleep(250);receipt=await transport("windows_operation_status",{operation_id:id});}
     }
@@ -339,7 +354,19 @@ async function callSlider(operation,args) {
   return rawCall(operation,args);
 }
 
-function write(object) { process.stdout.write(`${JSON.stringify(object)}\n`); }
+let outputDrain;
+async function write(object) {
+  const wire=`${JSON.stringify(object)}\n`;
+  if(process.stdout.writableLength+Buffer.byteLength(wire)>64*1024*1024){
+    process.stderr.write("Slider MCP output capacity exceeded; query operation receipts before retrying actions.\n");process.exit(1);
+  }
+  if(!process.stdout.write(wire)){
+    process.stdin.pause();
+    outputDrain ??= new Promise((resolve,reject)=>{const done=()=>{cleanup();resolve();},fail=error=>{cleanup();reject(error);},cleanup=()=>{process.stdout.off('drain',done);process.stdout.off('error',fail);};process.stdout.once('drain',done);process.stdout.once('error',fail);}).finally(()=>{outputDrain=undefined;});
+    await outputDrain;
+    if(process.stdout.writableLength===0)process.stdin.resume();
+  }
+}
 function toolResult(value, isError = false) {
   return { content: [{ type: "text", text: JSON.stringify(value) }], isError };
 }
@@ -367,7 +394,7 @@ async function handle(request) {
       return { jsonrpc: "2.0", id, result: {
         protocolVersion: request.params?.protocolVersion || "2025-06-18",
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "slider-for-claude", version: "0.3.10" },
+        serverInfo: { name: "slider-for-claude", version: "0.3.11" },
         instructions: "Plugin 0.3 requires control schema 3. Check windows_readiness before work. After an interrupted mutation query windows_operation_status with the returned operation_id; never blindly repeat unknown work. Expand/paginate truncated UI trees. Use windows_session_list to reconnect to surviving jobs. Use Slider's local Windows 11 ARM64 environment for Windows development and visual testing. Start or resume Windows before using guest tools. Before Mac/Windows file work, call windows_shared_folder_status, compare mac_path with the intended project, map its relative path onto the returned UNC path, and verify access. An online share may point at an unrelated folder; do not conclude file sharing is unsupported. Shared-source commands require cache_policy.ready and a shared project working_directory so Slider refreshes cached files before launch. For repeatable builds, put compiler outputs on the Windows local disk or use verified local imports; same-path executable writes on WebDAV can fail with Windows error 58. Call windows_shared_folder_refresh before an existing session or app re-reads Mac edits. Keep sources stable during builds. For large trees or local-disk semantics, use verified imports into new Windows destinations. Use bounded windows_project_import/export for authorized separate local copies.",
       }};
     case "ping": return { jsonrpc: "2.0", id, result: {} };
@@ -396,11 +423,13 @@ async function handle(request) {
 export { recordedCall, send, callSlider, readEndpoints, tools };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
+const reader = new BoundedFrames(MAX_RESPONSE);
+let pendingBytes = 0;
 let visualChain = Promise.resolve();
 let pending = 0;
 const visualTools = new Set(["windows_launch", "windows_window_wait", "windows_list", "windows_window_action", "windows_ui_inspect", "windows_ui_action", "windows_ui_wait", "windows_hover", "windows_click", "windows_drag", "windows_scroll", "windows_key", "windows_type", "windows_screenshot"]);
-lines.on("line", (line) => {
+function handleLine(frame) {
+  const line=frame.toString("utf8");
   if (!line.trim()) return;
   let request;
   try { request = JSON.parse(line); } catch {
@@ -411,21 +440,25 @@ lines.on("line", (line) => {
     write({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request." } });
     return;
   }
-  if (pending >= 32) {
+  if (pending >= 32 || pendingBytes + frame.length > 32*1024*1024) {
     if (request.id !== undefined) write({ jsonrpc: "2.0", id: request.id, error: { code: -32000, message: "Too many pending Slider requests. Wait for a response before retrying." } });
     return;
   }
-  pending++;
+  pending++;pendingBytes+=frame.length;
   const run = async () => {
     try {
       const response = await handle(request);
-      if (response) write(response);
+      if (response) await write(response);
     } catch (error) {
-      if (request?.id !== undefined) write({ jsonrpc: "2.0", id: request.id, error: { code: -32603, message: error.message } });
-    } finally { pending--; }
+      if (request?.id !== undefined) await write({ jsonrpc: "2.0", id: request.id, error: { code: -32603, message: error.message } });
+    } finally { pending--;pendingBytes-=frame.length; }
   };
   if (request.method === "tools/call" && visualTools.has(request.params?.name)) visualChain = visualChain.then(run);
   else void run();
+}
+process.stdin.on("data",chunk=>{
+ try{for(const frame of reader.push(chunk))handleLine(frame);}
+ catch(error){process.stderr.write(error.message+"\n");process.stdin.destroy();process.exitCode=1;}
 });
 
 }

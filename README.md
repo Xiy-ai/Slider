@@ -17,7 +17,7 @@ This repository contains only the Claude plugin. It does not contain the Slider 
 - Guest helper 0.6.9 and control schema 3 (updated by compatible Slider builds).
 - Node.js 20 or newer, and a local Claude Code session on the same Mac.
 
-Version 0.3.9 matches the current Codex plugin release. On 3 October 2026, isolated package checks passed initialization and exact parity for all 50 tool schemas and capabilities. This does not establish a fresh Claude Desktop end-to-end test. Public app availability is separate; check your installed app's readiness before use. Cloud sessions cannot reach this local VM. Keep Slider visible: minimizing may pause Windows.
+Version 0.3.11 matches the current Codex plugin release. On 9 October 2026, isolated package checks passed initialization and exact parity for all 50 tool schemas and capabilities. This does not establish a fresh Claude Desktop end-to-end test. Public app availability is separate; check your installed app's readiness before use. Cloud sessions cannot reach this local VM. Keep Slider visible: minimizing may pause Windows.
 
 ## Install
 
@@ -53,6 +53,14 @@ The plugin runs a local MCP process and communicates with Slider's private local
 Contact contact@xiy.ai. Product: https://slider.xiy.ai
 
 Licensed under Apache-2.0; see LICENSE.
+
+## Version 0.3.11
+
+Bounds MCP message buffering, caches local endpoint discovery, and backs off
+operation polling. File transfers now store their manifest separately from
+progress updates, preserve durable export progress after write failures, and
+enforce the four-transfer limit before asynchronous startup. Existing transfer
+journals remain readable. Restart the plugin connection to load this version.
 
 ## Version 0.3.10
 
